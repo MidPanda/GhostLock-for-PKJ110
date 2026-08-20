@@ -1,6 +1,3 @@
-# Build artifacts are intentionally tracked
-build/
-
 # Python
 __pycache__/
 *.pyc
