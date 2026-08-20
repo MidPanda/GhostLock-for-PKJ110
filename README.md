@@ -1,8 +1,30 @@
-# CVE-2026-43499 PoC (GhostLock)
+# CVE-2026-43499 — GhostLock PoC
 
-Kernel privilege-escalation exploit PoC for the OPPO Find X8 Ultra (PKJ110,
-Android 15, kernel 6.6). Research / education only — runs against devices you
-own and are authorized to test.
+**A device-specific kernel privilege-escalation exploit for the OPPO Find X8
+Ultra (PKJ110, ColorOS 15 / Android 15, kernel 6.6).**
+
+## Read this first: target specificity
+
+This exploit is **hard-bound to one device model and one firmware build**.
+It is not a generic Android exploit and will not run anywhere else:
+
+- **Kernel data offsets** (`src/targets/oppo-findx8ultra/target.h`) — module
+  list heads, `ashmem_misc.fops`, `system_unbound_wq`, selinux state, cred
+  offsets — were extracted from this specific kernel build
+  (`6.6.89-android15-8-gf4dc45704e54`). Any other kernel = wrong addresses =
+  crash, not root.
+- **Vendor anti-root defenses** (`oplus_secure_guard_new` kprobe hooks,
+  Swordfish launch/install mitigation properties) are OPPO/ColorOS-specific
+  and are neutralized by name and by structure offset.
+- **Heap-grooming parameters** (spray counts, slab caches, pipe shapes) were
+  tuned against this device's runtime behavior.
+- No offset auto-discovery, no fallback probing: the chain runs against the
+  PKJ110 target config or it fails.
+
+Verification of the exploit on any other device — including other OPPO
+models, other Android versions, or other kernel builds of the same model —
+requires re-deriving all offsets and re-validating the vendor-defense
+neutralization from scratch.
 
 ## One exploit chain (7 steps)
 
@@ -32,7 +54,7 @@ _rebuild.bat        (Windows; or see the clang invocation inside)
 
 Artifact: `build/oppo-findx8ultra/bin/preload.so`
 
-## Run (device)
+## Run (PKJ110 only)
 
 ```
 adb push build/oppo-findx8ultra/bin/preload.so /data/local/tmp/gl-aso.so
@@ -49,6 +71,12 @@ Diagnostic-only env exits (no root): `GHOSTLOCK_SLIDE_ONLY`,
 `GHOSTLOCK_KERNELSNITCH_ONLY`, `GHOSTLOCK_FOPS_DRYRUN`,
 `GHOSTLOCK_FORCE_KASLR_BASE`.
 
+## Legal / responsible use
+
+For security research on devices you own or are explicitly authorized to
+test. The code is published for defensive research and vulnerability
+disclosure purposes.
+
 ## Layout
 
 ```
@@ -61,7 +89,7 @@ src/umh_root.c     UMH root injection + Swordfish watcher
 src/root.c         fallback cred-patch path + magica stages
 src/magica.c       KernelSU load / props / soft reboot
 src/preload.c      LD_PRELOAD constructor
-src/targets/       device-specific offsets (PKJ110)
+src/targets/       device-specific offsets (PKJ110 — the hard binding)
 src/kernelsnitch/  third-party leak primitives (utils)
 build/             prebuilt artifacts
 ```
