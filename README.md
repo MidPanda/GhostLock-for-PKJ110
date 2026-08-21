@@ -1,32 +1,22 @@
-# CVE-2026-43499 — GhostLock PoC
+# GhostLock for PKJ110
 
-**A device-specific kernel privilege-escalation exploit for the OPPO Find X8
-Ultra (PKJ110, ColorOS 15 / Android 15, kernel 6.6).**
+English | [中文](README_CN.md)
 
-## Read this first: target specificity
+CVE-2026-43499 exploit for the OPPO Find X8 Ultra.
 
-This exploit is **hard-bound to one device model and one firmware build**.
-It is not a generic Android exploit and will not run anywhere else:
+| | |
+|---|---|
+| Device | OPPO Find X8 Ultra (PKJ110) |
+| SoC | Snapdragon 8 Elite (SM8750) |
+| Kernel | `6.6.89-android15-8-gf4dc45704e54-abogki446052083-4k` |
+| Firmware | `PKJ110_16.0.3.500(CN01)` |
 
-- **Kernel data offsets** (`src/targets/oppo-findx8ultra/target.h`) — module
-  list heads, `ashmem_misc.fops`, `system_unbound_wq`, selinux state, cred
-  offsets — were extracted from this specific kernel build
-  (`6.6.89-android15-8-gf4dc45704e54`). Any other kernel = wrong addresses =
-  crash, not root.
-- **Vendor anti-root defenses** (`oplus_secure_guard_new` kprobe hooks,
-  Swordfish launch/install mitigation properties) are OPPO/ColorOS-specific
-  and are neutralized by name and by structure offset.
-- **Heap-grooming parameters** (spray counts, slab caches, pipe shapes) were
-  tuned against this device's runtime behavior.
-- No offset auto-discovery, no fallback probing: the chain runs against the
-  PKJ110 target config or it fails.
+Only tested on the exact kernel and firmware above. The offsets and the
+secureguard/Swordfish neutralization are tied to this build — on anything
+else it just crashes. If you're porting to another device, expect to redo
+most of `src/targets/` from scratch.
 
-Verification of the exploit on any other device — including other OPPO
-models, other Android versions, or other kernel builds of the same model —
-requires re-deriving all offsets and re-validating the vendor-defense
-neutralization from scratch.
-
-## One exploit chain (7 steps)
+## Exploit chain
 
 ```
 1/7 KASLR leak      pselect + boot_id (nfnetlink logger pointer)
@@ -36,60 +26,71 @@ neutralization from scratch.
                     repair boot_id / loggers[1] render slot
  ├ 5/7 pipe phys-RW splice/page_cache read-write of physmap/slab
  ├ 6/7 secureguard  zero oplus_secure_guard_new kprobe handlers
- └ 7/7 UMH root     fake work_struct -> system_unbound_wq; kernel forks
+ └ 7/7 UMH root     fake work_struct → system_unbound_wq; kernel forks
                     the root script (no setuid/setenforce syscall)
                     fallback: cred patch
                     then: Swordfish watcher clears mitigation props
 ```
 
-Root mechanism fork: UMH (primary) -> cred-patch (fallback).
+If UMH fails it falls back to cred patching, but on this device UMH has
+been reliable, so the fallback path is mostly untested.
 
 ## Build
 
 NDK r27d, clang, aarch64-linux-android35:
 
-```
-_rebuild.bat        (Windows; or see the clang invocation inside)
+```bash
+_rebuild.bat          # Windows
+# or: see the clang invocation inside _build.py
 ```
 
-Artifact: `build/oppo-findx8ultra/bin/preload.so`
+Output: `build/oppo-findx8ultra/bin/preload.so`
 
-## Run (PKJ110 only)
+## Run
 
-```
+```bash
 adb push build/oppo-findx8ultra/bin/preload.so /data/local/tmp/gl-aso.so
-# after reboot: wait >= 3 min uptime
+# after reboot: waiting for uptime >= 3 min is recommended for a high success rate
 cd /data/local/tmp
-GHOSTLOCK_MAGICA=1 DEBUG=1 LD_PRELOAD=./gl-aso.so timeout 115 /system/bin/true
+GHOSTLOCK_MAGICA=1 LD_PRELOAD=./gl-aso.so timeout 115 /system/bin/true
 ```
 
-Without `DEBUG=1` only the per-step markers and the final verdict
-(`ROOT 成功` / `ROOT 失败`) are printed; with it, full diagnostics.
+Without `DEBUG=1` it only prints the per-step markers and the final
+verdict (`ROOT 成功` / `ROOT 失败`). With it, the full diagnostic log.
 
-Diagnostic-only env exits (no root): `GHOSTLOCK_SLIDE_ONLY`,
+Debug env vars (leak experiments, no root): `GHOSTLOCK_SLIDE_ONLY`,
 `GHOSTLOCK_BOOT_ID_LEAK_ONLY`, `GHOSTLOCK_FOPS_PI_ONLY`,
 `GHOSTLOCK_KERNELSNITCH_ONLY`, `GHOSTLOCK_FOPS_DRYRUN`,
 `GHOSTLOCK_FORCE_KASLR_BASE`.
 
-## Legal / responsible use
-
-For security research on devices you own or are explicitly authorized to
-test. The code is published for defensive research and vulnerability
-disclosure purposes.
-
 ## Layout
 
 ```
-src/main.c         run_exploit: step chain + verdicts
-src/slide.c        KASLR leak stages (pselect/boot_id)
-src/fops.c         FOPS hijack + CFI stage + child-root install
-src/pipe.c         pipe-based physical read/write
-src/secureguard.c  oplus_secure_guard_new neutralization
-src/umh_root.c     UMH root injection + Swordfish watcher
-src/root.c         fallback cred-patch path + magica stages
-src/magica.c       KernelSU load / props / soft reboot
-src/preload.c      LD_PRELOAD constructor
-src/targets/       device-specific offsets (PKJ110 — the hard binding)
-src/kernelsnitch/  third-party leak primitives (utils)
-build/             prebuilt artifacts
+src/main.c            exploit entry, step chain, verdicts
+src/slide.c           KASLR leak (pselect / boot_id)
+src/fops.c            FOPS hijack, CFI stage, child-root install
+src/pipe.c            pipe-based physical read/write
+src/secureguard.c     oplus_secure_guard_new neutralization
+src/umh_root.c        UMH root injection + Swordfish watcher
+src/root.c            fallback cred-patch + magica stages
+src/magica.c          KernelSU load / props / soft reboot
+src/preload.c         LD_PRELOAD constructor
+src/targets/          device-specific offsets (PKJ110)
+src/kernelsnitch/     leak primitives (from upstream)
+build/                prebuilt artifacts
 ```
+
+## Thanks
+
+- [JoinChang/ghostlock-oneplus](https://github.com/joinchang/ghostlock-oneplus) —
+  the GhostLock exploit this is based on. The fops hijack, pipe physrw,
+  UMH root path and kernelsnitch utils all come from this tree.
+- [NebuSec/CyberMeowfia](https://github.com/NebuSec/CyberMeowfia) —
+  the original GhostLock research (IonStack writeups).
+
+## Note
+
+Most of the work is done with the help of AI.
+
+For authorized security research only, on devices you own. The author
+takes no responsibility for misuse.
